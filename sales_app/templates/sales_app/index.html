@@ -1,52 +1,112 @@
 {% load static %}
-{% load template_filters %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <title>Sales XML App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'sales_app/style.css' %}">
 </head>
 <body>
-    <header>
-        <h1>Приложение для продаж в XML</h1>
+    <header class="bg-primary text-white text-center py-3">
+        <h1>Приложение для продаж в XML и SQLite</h1>
     </header>
-    <main>
-        <section>
-            <h2>Ввод данных о продаже</h2>
-            <form method="post" action="{% url 'sales_app:save_to_xml' %}">
-                {% csrf_token %}
-                {{ form.as_p }}
-                <button type="submit">Сохранить в XML</button>
-            </form>
+    <main class="container my-4">
+        <section class="row">
+            <div class="col-md-6">
+                <h2>Ввод данных о продаже</h2>
+                <form method="post" action="{% url 'sales_app:save_data' %}">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </form>
+            </div>
+            <div class="col-md-6">
+                <h2>Загрузка XML-файла</h2>
+                <form method="post" action="{% url 'sales_app:upload_xml' %}" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <input type="file" name="xml_file" accept=".xml" class="form-control">
+                    <button type="submit" class="btn btn-secondary mt-2">Загрузить</button>
+                </form>
+                {% if error %}<div class="alert alert-danger mt-2">{{ error }}</div>{% endif %}
+            </div>
         </section>
-        <section>
-            <h2>Загрузка XML-файла</h2>
-            <form method="post" action="{% url 'sales_app:upload_xml' %}" enctype="multipart/form-data">
-                {% csrf_token %}
-                <input type="file" name="xml_file" accept=".xml">
-                <button type="submit">Загрузить</button>
-            </form>
-            {% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
+        <section class="row">
+            <div class="col-md-12">
+                <h2>Источник данных</h2>
+                <form method="get">
+                    <select name="source" class="form-select mb-2">
+                        <option value="xml" {% if source == 'xml' %}selected{% endif %}>XML</option>
+                        <option value="db" {% if source == 'db' %}selected{% endif %}>База данных</option>
+                    </select>
+                    <button type="submit" class="btn btn-outline-primary">Выбрать</button>
+                </form>
+            </div>
         </section>
-        <section>
-            <h2>Содержимое XML-файлов</h2>
-            {% if not has_files %}
-                <p>Нет XML-файлов в папке.</p>
-            {% else %}
-                {% for content in xml_contents %}
-                    <h3>Файл: {{ content.file }}</h3>
-                    {% if content.error %}
-                        <p style="color: red;">{{ content.error }}</p>
-                    {% else %}
-                        <ul>
-                            {% for sale in content.sales %}
-                            <li>ID: {{ sale.id }}{% for field in fields %}, {{ field.label }}: {% if field.type == 'bool' %}{% if sale|get_item:field.name %}Да{% else %}Нет{% endif %}{% else %}{{ sale|get_item:field.name }}{% endif %}{% endfor %}</li>                            {% endfor %}
-                        </ul>
-                    {% endif %}
-                {% endfor %}
-            {% endif %}
+        <section class="row">
+            <div class="col-md-12">
+                <h2>Содержимое</h2>
+                {% if not has_files %}
+                    <div class="alert alert-info">Нет данных.</div>
+                {% else %}
+                    {% for content in xml_contents %}
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h5>Файл: {{ content.file }}</h5>
+                            </div>
+                            {% if content.error %}
+                                <div class="card-body">
+                                    <div class="alert alert-danger">{{ content.error }}</div>
+                                </div>
+                            {% else %}
+                                <div class="card-body">
+                                    <ul class="list-group">
+                                        {% for sale in content.sales %}
+                                            <li class="list-group-item">
+                                                ID: {{ sale.id }}, Товар: {{ sale.product }}, Цена: {{ sale.price }}, Количество: {{ sale.quantity }}, Дата: {{ sale.date }}
+                                                {% if source == 'db' %}
+                                                    <a href="{% url 'sales_app:edit_sale' sale.id %}" class="btn btn-sm btn-primary ms-2">Редактировать</a>
+                                                    <a href="{% url 'sales_app:delete_sale' sale.id %}" class="btn btn-sm btn-danger ms-1" onclick="return confirm('Удалить?')">Удалить</a>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            </div>
         </section>
+        {% if source == 'db' %}
+            <section class="row">
+                <div class="col-md-12">
+                    <h2>Поиск в БД</h2>
+                    <input type="text" id="search" placeholder="Поиск по товару" class="form-control mb-2">
+                    <div id="search-results"></div>
+                </div>
+            </section>
+            <script>
+                document.getElementById('search').addEventListener('input', function() {
+                    var query = this.value;
+                    fetch(`/search-sales/?q=${query}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            var results = document.getElementById('search-results');
+                            results.innerHTML = '';
+                            data.sales.forEach(sale => {
+                                results.innerHTML += `<div class="card mb-2">
+                                    <div class="card-body">
+                                        ID: ${sale.id}, Товар: ${sale.product}, Цена: ${sale.price}, Количество: ${sale.quantity}, Дата: ${sale.date}
+                                        <a href="/edit-sale/${sale.id}/" class="btn btn-sm btn-primary ms-2">Редактировать</a>
+                                        <a href="/delete-sale/${sale.id}/" class="btn btn-sm btn-danger ms-1" onclick="return confirm('Удалить?')">Удалить</a>
+                                    </div>
+                                </div>`;
+                            });
+                        });
+                });
+            </script>
+        {% endif %}
     </main>
 </body>
 </html>

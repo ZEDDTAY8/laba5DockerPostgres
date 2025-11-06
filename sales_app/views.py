@@ -2,137 +2,186 @@ from django.shortcuts import render, redirect
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django import forms
+from django.db.models import Q
+from django.http import JsonResponse
+from .models import Sale
+from .forms import SaleForm
 import os
 import uuid
 import xml.etree.ElementTree as ET
+import xml.dom.minidom
 import logging
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Список полей для формы, XML и отображения
-FIELDS = [
-    {'name': 'product', 'label': 'Товар', 'type': 'str', 'max_length': 100},
-    {'name': 'price', 'label': 'Цена', 'type': 'float', 'min_value': 0},
-    {'name': 'quantity', 'label': 'Количество', 'type': 'int', 'min_value': 1},
-    {'name': 'date', 'label': 'Дата продажи', 'type': 'date'},
-]
-
-# Динамическая форма
-def create_sale_form():
-    class SaleForm(forms.Form):
-        for field in FIELDS:
-            if field['type'] == 'str':
-                locals()[field['name']] = forms.CharField(max_length=field.get('max_length', 100), label=field['label'])
-            elif field['type'] == 'float':
-                locals()[field['name']] = forms.FloatField(min_value=field.get('min_value', 0), label=field['label'])
-            elif field['type'] == 'int':
-                locals()[field['name']] = forms.IntegerField(min_value=field.get('min_value', 1), label=field['label'])
-            elif field['type'] == 'date':
-                locals()[field['name']] = forms.DateField(label=field['label'], widget=forms.DateInput(attrs={'type': 'date'}))
-            elif field['type'] == 'bool':
-                locals()[field['name']] = forms.BooleanField(label=field['label'], required=False) 
-    return SaleForm
-
 def index(request):
-    form = create_sale_form()()  
-    xml_files = []
-    xml_dir = os.path.join(settings.MEDIA_ROOT, 'xml_files')
-    if os.path.exists(xml_dir):
-        xml_files = [f for f in os.listdir(xml_dir) if f.endswith('.xml')]
-    
-    xml_contents = []
-    for file in xml_files:
-        try:
-            tree = ET.parse(os.path.join(xml_dir, file))
-            root = tree.getroot()
-            sales = []
-            for sale in root.findall('sale'):
-                data = {'id': sale.get('id')}
-                for field in FIELDS:
-                    text_value = sale.find(field['name']).text if sale.find(field['name']) is not None else ''
-                    if field['type'] == 'bool':
-                        data[field['name']] = text_value.lower() == 'true' 
-                    else:
-                        data[field['name']] = text_value
-                sales.append(data)
-            xml_contents.append({'file': file, 'sales': sales})
-        except ET.ParseError:
-            xml_contents.append({'file': file, 'error': 'Невалидный XML'})
+    form = SaleForm()
+    source = request.GET.get('source', 'xml')
+    if source == 'db':
+        sales = Sale.objects.all()
+        xml_contents = [{'file': 'База данных', 'sales': [{'id': s.id, 'product': s.product, 'price': s.price, 'quantity': s.quantity, 'date': str(s.date)} for s in sales]}]
+    else:
+        xml_files = []
+        xml_dir = os.path.join(settings.MEDIA_ROOT, 'xml_files')
+        if os.path.exists(xml_dir):
+            xml_files = [f for f in os.listdir(xml_dir) if f.endswith('.xml')]
+        
+        xml_contents = []
+        for file in xml_files:
+            try:
+                tree = ET.parse(os.path.join(xml_dir, file))
+                root = tree.getroot()
+                sales = []
+                for sale in root.findall('sale'):
+                    data = {'id': sale.get('id')}
+                    data['product'] = sale.find('product').text if sale.find('product') is not None else ''
+                    data['price'] = sale.find('price').text if sale.find('price') is not None else ''
+                    data['quantity'] = sale.find('quantity').text if sale.find('quantity') is not None else ''
+                    data['date'] = sale.find('date').text if sale.find('date') is not None else ''
+                    sales.append(data)
+                xml_contents.append({'file': file, 'sales': sales})
+            except ET.ParseError:
+                xml_contents.append({'file': file, 'error': 'Невалидный XML'})
 
-    context = {'form': form, 'xml_contents': xml_contents, 'has_files': bool(xml_files), 'fields': FIELDS}
+    context = {'form': form, 'xml_contents': xml_contents, 'has_files': bool(xml_contents), 'source': source}
     return render(request, 'sales_app/index.html', context)
 
-def save_to_xml(request):
+def save_data(request):
     if request.method == 'POST':
-        form = create_sale_form()(request.POST)
+        form = SaleForm(request.POST)
         if form.is_valid():
             data = form.cleaned_data
-            xml_dir = os.path.join(settings.MEDIA_ROOT, 'xml_files')
-            os.makedirs(xml_dir, exist_ok=True)
-            xml_files = [f for f in os.listdir(xml_dir) if f.endswith('.xml')]
-            if xml_files:
-                # Если файл есть, используем первый
-                file_name = xml_files[0]
-                file_path = os.path.join(xml_dir, file_name)
-                try:
-                    tree = ET.parse(file_path)
-                    root = tree.getroot()
-                    if root.tag != 'sales':
-                        logger.error(f"Неверный корневой тег в {file_name}: {root.tag}")
-                        return redirect('sales_app:index')
-                except ET.ParseError:
-                    logger.error(f"Ошибка парсинга {file_name}, создаём новый файл")
-                    file_name = None  # Создадим новый файл
-            else:
-                # Если файлов нет, создаём новый с рандомным именем
-                file_name = f"sales_{uuid.uuid4()}.xml"
-                file_path = os.path.join(xml_dir, file_name)
-                root = ET.Element('sales')
+            storage_type = data['storage_type']
+            if storage_type == 'db':
+                if Sale.objects.filter(product=data['product'], price=data['price'], quantity=data['quantity'], date=data['date']).exists():
+                    return render(request, 'sales_app/index.html', {'error': 'Дубликат записи в БД. Данные не сохранены.'})
+                Sale.objects.create(product=data['product'], price=data['price'], quantity=data['quantity'], date=data['date'])
+            elif storage_type == 'xml':
+                xml_dir = os.path.join(settings.MEDIA_ROOT, 'xml_files')
+                os.makedirs(xml_dir, exist_ok=True)
+                xml_files = [f for f in os.listdir(xml_dir) if f.endswith('.xml')]
+                if xml_files:
+                    file_name = xml_files[0]
+                    file_path = os.path.join(xml_dir, file_name)
+                    try:
+                        tree = ET.parse(file_path)
+                        root = tree.getroot()
+                        if root.tag != 'sales':
+                            logger.error(f"Неверный корневой тег в {file_name}: {root.tag}")
+                            return redirect('sales_app:index')
+                    except ET.ParseError:
+                        logger.error(f"Ошибка парсинга {file_name}, создаём новый файл")
+                        file_name = None
+                else:
+                    file_name = f"sales_{uuid.uuid4()}.xml"
+                    file_path = os.path.join(xml_dir, file_name)
+                    root = ET.Element('sales')
 
-            # Если файл не был загружен (или невалиден), создаём новый
-            if not xml_files or not file_name:
-                root = ET.Element('sales')
-                file_name = f"sales_{uuid.uuid4()}.xml"
-                file_path = os.path.join(xml_dir, file_name)
+                if not xml_files or not file_name:
+                    root = ET.Element('sales')
+                    file_name = f"sales_{uuid.uuid4()}.xml"
+                    file_path = os.path.join(xml_dir, file_name)
 
-            # Добавляем новую продажу
-            sale = ET.SubElement(root, 'sale', id=str(uuid.uuid4()))
-            for field in FIELDS:
-                value = data.get(field['name'])
-                if value is not None:
-                    ET.SubElement(sale, field['name']).text = str(value) if field['type'] != 'date' else value.strftime('%Y-%m-%d')
+                sale = ET.SubElement(root, 'sale', id=str(uuid.uuid4()))
+                ET.SubElement(sale, 'product').text = data['product']
+                ET.SubElement(sale, 'price').text = str(data['price'])
+                ET.SubElement(sale, 'quantity').text = str(data['quantity'])
+                ET.SubElement(sale, 'date').text = data['date'].strftime('%Y-%m-%d')
 
-            # Сохраняем XML
-            tree = ET.ElementTree(root)
-            tree.write(file_path, encoding='utf-8', xml_declaration=True)
-            logger.debug(f"Сохранено в {file_path}")
+                xml_str = ET.tostring(root, encoding='unicode')
+                parsed = xml.dom.minidom.parseString(xml_str)
+                pretty_xml = parsed.toprettyxml(indent="  ", encoding='utf-8').decode('utf-8')
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(pretty_xml)
+                logger.debug(f"Сохранено в {file_path}")
             return redirect('sales_app:index')
     return redirect('sales_app:index')
+
+def edit_sale(request, pk):
+    sale = Sale.objects.get(id=pk)
+    if request.method == 'POST':
+        form = SaleForm(request.POST)
+        if form.is_valid():
+            sale.product = form.cleaned_data['product']
+            sale.price = form.cleaned_data['price']
+            sale.quantity = form.cleaned_data['quantity']
+            sale.date = form.cleaned_data['date']
+            sale.save()
+            return redirect('sales_app:index')
+    else:
+        form = SaleForm(initial={'product': sale.product, 'price': sale.price, 'quantity': sale.quantity, 'date': sale.date})
+    return render(request, 'sales_app/edit.html', {'form': form, 'sale': sale})
+
+def delete_sale(request, pk):
+    sale = Sale.objects.get(id=pk)
+    sale.delete()
+    return redirect('sales_app:index')
+
+def search_sales(request):
+    query = request.GET.get('q', '')
+    sales = Sale.objects.filter(Q(product__icontains=query))
+    results = [{'id': s.id, 'product': s.product, 'price': s.price, 'quantity': s.quantity, 'date': str(s.date)} for s in sales]
+    return JsonResponse({'sales': results})
 
 def upload_xml(request):
     if request.method == 'POST' and 'xml_file' in request.FILES:
         xml_file = request.FILES['xml_file']
         if xml_file.name.endswith('.xml'):
-            file_name = f"uploaded_{uuid.uuid4()}.xml"
+            temp_file_name = f"temp_{uuid.uuid4()}.xml"
+            temp_file_path = os.path.join(settings.MEDIA_ROOT, 'xml_files', temp_file_name)
             fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'xml_files'))
-            path = fs.save(file_name, xml_file)
-            full_path = os.path.join(settings.MEDIA_ROOT, 'xml_files', file_name)
+            fs.save(temp_file_name, xml_file)
 
             try:
-                tree = ET.parse(full_path)
+                tree = ET.parse(temp_file_path)
                 root = tree.getroot()
                 if root.tag != 'sales':
-                    os.remove(full_path)
+                    os.remove(temp_file_path)
                     return render(request, 'sales_app/index.html', {'error': 'Невалидный XML: ожидается корневой тег <sales>'})
+
+                # Проверка полей
                 for sale in root.findall('sale'):
-                    if not all(sale.find(field['name']) is not None for field in FIELDS):
-                        os.remove(full_path)
-                        return render(request, 'sales_app/index.html', {'error': 'Невалидный XML: отсутствуют обязательные поля'})
+                    for field in ['product', 'price', 'quantity', 'date']:
+                        if sale.find(field) is None:
+                            os.remove(temp_file_path)
+                            return render(request, 'sales_app/index.html', {'error': f'Невалидный XML: отсутствует поле {field}'})
+
+                # Объединяем с основным файлом
+                xml_dir = os.path.join(settings.MEDIA_ROOT, 'xml_files')
+                xml_files = [f for f in os.listdir(xml_dir) if f.startswith('sales_') and f.endswith('.xml')]
+                if xml_files:
+                    main_file = xml_files[0]
+                    main_path = os.path.join(xml_dir, main_file)
+                    main_tree = ET.parse(main_path)
+                    main_root = main_tree.getroot()
+                else:
+                    main_root = ET.Element('sales')
+                    main_file = f"sales_{uuid.uuid4()}.xml"
+                    main_path = os.path.join(xml_dir, main_file)
+
+                # Копируем sale
+                for sale in root.findall('sale'):
+                    new_sale = ET.SubElement(main_root, 'sale', id=sale.get('id') or str(uuid.uuid4()))
+                    for field in ['product', 'price', 'quantity', 'date']:
+                        elem = sale.find(field)
+                        if elem is not None:
+                            ET.SubElement(new_sale, field).text = elem.text
+
+                # Сохраняем с форматированием
+                xml_str = ET.tostring(main_root, encoding='unicode')
+                parsed = xml.dom.minidom.parseString(xml_str)
+                pretty_xml = parsed.toprettyxml(indent="  ", encoding='utf-8').decode('utf-8')
+                with open(main_path, 'w', encoding='utf-8') as f:
+                    f.write(pretty_xml)
+
+                os.remove(temp_file_path)
+                return redirect('sales_app:index')
+
             except ET.ParseError:
-                os.remove(full_path)
-                return render(request, 'sales_app/index.html', {'error': 'Невалидный XML-файл. Файл удалён.'})
+                os.remove(temp_file_path)
+                return render(request, 'sales_app/index.html', {'error': 'Невалидный XML-файл'})
         else:
-            return render(request, 'sales_app/index.html', {'error': 'Только XML-файлы.'})
+            return render(request, 'sales_app/index.html', {'error': 'Только XML-файлы'})
     return redirect('sales_app:index')

@@ -7,8 +7,9 @@ Django-приложение для работы с данными о прода�
 2. Создайте venv: `python -m venv venv`
 3. Активируйте: `venv\Scripts\activate` (Windows) или `source venv/bin/activate` (Linux)
 4. Установите зависимости: `pip install -r requirements.txt`
-5. Создайте папку для файлов: `mkdir media\xml_files`
-6. Запустите: `python manage.py runserver`
+5. Миграции: `python manage.py migrate`
+6. Создайте папку для файлов: `mkdir media\xml_files`
+7. Запустите: `python manage.py runserver`
 
 ## Функционал
 - Ввод данных о продажах через форму с валидацией.
