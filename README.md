@@ -1,23 +1,23 @@
-# Sales XML App (Dockerized с PostgreSQL)
+# Sales XML App (Dockerized with PostgreSQL)
 
-Это Django-приложение для работы с данными о продажах. Данные можно сохранять в XML-файлах или в базе данных PostgreSQL. Приложение упаковано в Docker.
+Это Django-приложение для работы с данными о продажах. Данные можно сохранять в XML-файлах или в базе данных PostgreSQL. Приложение упаковано в Docker для простоты запуска.
 
 ## Требования
 - Установленный Docker и Docker Compose (на Red OS Linux: откройте терминал и выполните `sudo dnf install docker docker-compose` — если Red OS на базе Fedora, это сработает. Если нужно, проверьте документацию Red OS для установки Docker).
 - Свободный порт 8000 на вашем компьютере.
 
 ## Установка и запуск для разработки (просто для тестирования)
-1. Скачайте проект с GitHub: В терминале выполните `git clone https://github.com/ZEDDTAY8/laba5DockerPostgres.git`. Перейдите в папку: `cd laba5DockerPostgres`.
+1. Скачайте проект с GitHub: В терминале выполните `git clone https://github.com/ZEDDTAY8/laba3Xml-dockerized.git` (замените на ссылку вашего репозитория). Перейдите в папку: `cd laba3Xml-dockerized`.
 2. Создайте файл `.env` в корне папки. Скопируйте в него это (замените пароли на свои, если хотите):
-   ```
-   DB_NAME=sales_db
-   DB_USER=sales_user
-   DB_PASSWORD=123
-   DB_HOST=db
-   DB_PORT=5432
-   SECRET_KEY=j6--dSnZ-g7LVFcgBR6SOIPy3urLYyIlXtDR2P2s_SLr_OVzY0w7NAVB5jA6-zgl6RM (или Сгенерируйте: python -c "import secrets; print(secrets.token_urlsafe(50))")
-   DEBUG=True
-   ```
+
+DB_NAME=sales_db
+DB_USER=sales_user
+DB_PASSWORD=Пароль
+DB_HOST=db
+DB_PORT=5432
+SECRET_KEY=Ключ Сгенерируйте: python -c "import secrets; print(secrets.token_urlsafe(50))"
+DEBUG=True
+
 3. Запустите приложение: В терминале выполните `docker-compose up --build`. Это соберёт и запустит контейнеры (приложение и базу данных). Подождите, пока увидите сообщение о запуске сервера.
 4. Откройте в браузере: http://localhost:8000 (или http://127.0.0.1:8000).
 5. Первый раз настройте базу: В новом терминале выполните `docker-compose exec web python manage.py migrate` (это создаст таблицы в PostgreSQL).
@@ -40,10 +40,12 @@
 4. Импортируйте: `docker-compose exec web python manage.py loaddata data.json`.
 5. Проверьте в приложении, что данные появились.
 
+Если данных мало, можно ввести заново через форму в приложении.
+
 ## Функционал
-- Ввод продаж через форму.
-- Проверка на дубликаты в БД.
-- Просмотр данных из XML или БД.
+- Ввод продаж через форму (выберите в XML или БД).
+- Проверка на дубликаты в БД (не добавит, если уже есть).
+- Просмотр данных из XML или БД (выберите источник).
 - Поиск по товарам в БД (AJAX, работает динамически).
 - Редактирование и удаление записей в БД.
 - Загрузка XML-файлов.
