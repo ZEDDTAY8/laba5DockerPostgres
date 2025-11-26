@@ -7,7 +7,7 @@
 - Свободный порт 8000 на вашем компьютере.
 
 ## Установка и запуск для разработки (просто для тестирования)
-1. Скачайте проект с GitHub: В терминале выполните `git clone https://github.com/ZEDDTAY8/laba3Xml-dockerized.git` (замените на ссылку вашего репозитория). Перейдите в папку: `cd laba3Xml-dockerized`.
+1. Скачайте проект с GitHub: В терминале выполните `git clone https://github.com/ZEDDTAY8/laba5DockerPostgres`. Перейдите в папку: `cd laba5DockerPostgres`.
 2. Создайте файл `.env` в корне папки. Скопируйте в него это (замените пароли на свои, если хотите):
 
 DB_NAME=sales_db
